@@ -18,6 +18,10 @@ app.use(express.json());
 
 
 
+
+
+
+
 mongoose.connect('mongodb://kushagrash2001:9dfTwmKFIwM0DHCE@ac-dftvnhs-shard-00-00.wvbmnzm.mongodb.net:27017,ac-dftvnhs-shard-00-01.wvbmnzm.mongodb.net:27017,ac-dftvnhs-shard-00-02.wvbmnzm.mongodb.net:27017/?ssl=true&replicaSet=atlas-12unim-shard-0&authSource=admin&appName=Cluster0')
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.log('❌ MongoDB Error:', err));
