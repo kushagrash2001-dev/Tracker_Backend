@@ -177,7 +177,9 @@ async function aggregateUniqueActivity(deviceId, username, machineName, data) {
     // Don't crash the main request if aggregation fails
   }
 }
-
+app.get('/',(req,res)=>{
+  res.send("up and running")
+})
 // ==========================================
 // ROUTE: POST /api/track
 // ==========================================
