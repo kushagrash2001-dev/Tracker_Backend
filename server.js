@@ -14,7 +14,11 @@ app.use(cors());
 app.use(express.json());
 
 // --- 1. MONGODB CONNECTION ---
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/timeTrackerDB')
+
+
+
+
+mongoose.connect('mongodb://kushagrash2001:9dfTwmKFIwM0DHCE@ac-dftvnhs-shard-00-00.wvbmnzm.mongodb.net:27017,ac-dftvnhs-shard-00-01.wvbmnzm.mongodb.net:27017,ac-dftvnhs-shard-00-02.wvbmnzm.mongodb.net:27017/?ssl=true&replicaSet=atlas-12unim-shard-0&authSource=admin&appName=Cluster0')
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.log('❌ MongoDB Error:', err));
 const ImageKit = require('imagekit');
