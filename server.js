@@ -3,8 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const multer = require('multer');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const cloudinary = require('cloudinary').v2;
+
 
 const Device = require('./models/Device');
 const Activity = require('./models/Activity');
@@ -18,23 +17,20 @@ app.use(express.json());
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/timeTrackerDB')
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.log('❌ MongoDB Error:', err));
+const ImageKit = require('imagekit');
 
+
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
+});
+
+// store file in memory (not disk)
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 // --- 2. CLOUDINARY SETUP ---
 // You will get these keys by creating a free Cloudinary account
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'tracker_screenshots',
-    format: async (req, file) => 'png',
-  },
-});
-const upload = multer({ storage: storage });
 
 // ==========================================
 // ROUTE 1: THE AGENT INGESTION ENDPOINT
@@ -179,24 +175,42 @@ async function aggregateUniqueActivity(deviceId, username, machineName, data) {
 // ==========================================
 app.post('/api/track', upload.single('screenshot'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No image provided' });
-    
-    // Parse JSON string from Rust agent
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image provided' });
+    }
+
+    // Parse JSON from agent
     const data = JSON.parse(req.body.activityData);
 
-    // 1. FIND OR CREATE DEVICE (Upsert prevents race conditions)
+    // ✅ Upload to ImageKit
+    let uploadedImage;
+    try {
+      uploadedImage = await imagekit.upload({
+        file: req.file.buffer, // memory buffer
+        fileName: `screenshot_${Date.now()}.png`,
+        folder: "/tracker_screenshots",
+      });
+    } catch (uploadErr) {
+      console.error("❌ Image upload failed:", uploadErr.message);
+      return res.status(500).json({ error: "Image upload failed" });
+    }
+
+    const screenshotUrl = uploadedImage.url;
+    const fileId = uploadedImage.fileId;
+
+    // 1. FIND OR CREATE DEVICE
     const device = await Device.findOneAndUpdate(
       { machineName: data.machineName },
-      { 
+      {
         $set: { lastActive: new Date() },
         $setOnInsert: { employeeName: data.username || "Unassigned User" }
       },
       { upsert: true, returnDocument: 'after' }
     );
 
-    // 2. SAVE RAW ACTIVITY LOG (Upsert prevents E11000 Duplicate Key Errors)
+    // 2. SAVE ACTIVITY (WITH IMAGEKIT DATA)
     const activityPayload = {
-      deviceId: device._id, 
+      deviceId: device._id,
       activityId: data.id,
       activeWindow: data.activeWindow,
       browserUrl: data.browserUrl,
@@ -209,31 +223,36 @@ app.post('/api/track', upload.single('screenshot'), async (req, res) => {
       cpuCores: data.cpuCores,
       batteryPct: data.batteryPct,
       isPluggedIn: data.isPluggedIn,
-      freeDiskSpaceGB: data.freeDiskSpaceGb || data.freeDiskSpaceGB, 
-      screenshotUrl: req.file.path, 
+      freeDiskSpaceGB: data.freeDiskSpaceGb || data.freeDiskSpaceGB,
+      screenshotUrl: screenshotUrl,
+      imagekitFileId: fileId, // 🔥 store for deletion
       timestamp: new Date(data.timestamp * 1000),
     };
 
     await Activity.findOneAndUpdate(
-      { activityId: data.id }, 
+      { activityId: data.id },
       { $set: activityPayload },
-      { upsert: true, new: true }
+     { upsert: true, returnDocument: 'after' }
     );
 
-    // 3. AGGREGATE UNIQUE ACTIVITY (High-Fidelity or Fallback)
+    // 3. AGGREGATE ACTIVITY
     await aggregateUniqueActivity(
-      device._id, 
-      data.username, 
-      data.machineName, 
+      device._id,
+      data.username,
+      data.machineName,
       data
     );
 
-    console.log(`[SYNCED] ${data.machineName} (${data.username}) | Log Entries: ${data.activityLog ? data.activityLog.length : 1}`);
-    
+    console.log(
+      `[SYNCED] ${data.machineName} (${data.username}) | Logs: ${
+        data.activityLog ? data.activityLog.length : 1
+      }`
+    );
+
     res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error('Ingestion Error:', error);
+    console.error('❌ Ingestion Error:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
